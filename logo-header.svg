@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="100%" height="100%">
+  <!-- Background is transparent (no <rect> background element) -->
+  <style>
+    .logo-text {
+      font-family: "Georgia", "Times New Roman", serif;
+      font-weight: bold;
+      fill: #00205B; /* Dark navy color applied to text */
+    }
+  </style>
+  
+  <!-- Text Elements with Navy Blue fill -->
+  <text x="250" y="160" font-size="110" class="logo-text">The</text>
+  <text x="100" y="320" font-size="200" class="logo-text">Orpte</text>
+</svg>
