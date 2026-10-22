@@ -1,31 +1,38 @@
-/*! SR7 Technology label layout v1.0  |  The Orpte / SR7Themes
- *  BBC-style label page: full-width hero, thumbnail list, Videos rail, "More Tech" cards + Load more.
- *  Self-contained: injects its own CSS, reads the Blogger JSON feed, adds JSON-LD.
- *  Needs the shell  <div id="sr7-tech" data-label="Technology">  rendered by the theme.
- *  If this file fails to load, the theme's normal post grid stays visible (no blank page).
+/*! SR7 Technology label layout v1.1  |  The Orpte / SR7Themes
+ *  BBC-style label page: full-width hero, rows with left thumbnails, Tech-videos rail, "More Tech" cards with right images.
+ *  - Self-contained: injects its own CSS, reads the Blogger JSON feed, adds JSON-LD.
+ *  - Needs the shell  <div id="sr7-tech" data-label="Technology">  rendered by the theme.
+ *  - If it fails, the theme's normal post grid stays visible (no blank page).
+ *  - Posts without a Blogger thumbnail get their first image (or YouTube thumbnail) read from the post itself.
  */
 (function () {
   'use strict';
 
   /* ================= SETTINGS ================= */
   var CFG = {
-    videoLabels: ['videos', 'video'],   // posts with these labels are kept out of the lists (they go in the rail)
-    videoLabel: 'Videos',               // label used for the Videos rail
+    videoLabels: ['videos', 'video'],   // posts with these labels are kept out of the lists
+    videoLabel: 'Videos',               // rail = posts that have BOTH this label and the page label
     firstBatch: 25,                     // posts fetched on first load
     moreBatch: 12,                      // posts added per "Load more" tap
-    topCount: 4,                        // rows shown under the hero
+    topCount: 4,                        // rows (left thumbnail) under the hero
     railMax: 8,                         // tiles in the Videos rail
-    railMin: 3,                         // fewer tech videos than this -> fill the rail with latest videos
     moreTitle: 'More Tech',
     heroChars: 200,
-    cardChars: 150
+    cardChars: 150,
+    placeholder: '',                    // text on the grey box when a post has no image ('' = site name)
+    prettyUrl: 'Technology'             // show /Technology in the address bar (only if /Technology redirects here); '' = off
   };
 
   var ORIGIN = location.origin;
   var PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>';
+  var SITE = CFG.placeholder || (function () {
+    var m = document.querySelector('meta[property="og:site_name"]');
+    return (m && m.content) || String(document.title).split('|').pop().trim() || 'News';
+  })();
 
   /* ================= helpers ================= */
   function $(s, c) { return (c || document).querySelector(s); }
+  function $$(s, c) { return Array.prototype.slice.call((c || document).querySelectorAll(s)); }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -33,7 +40,7 @@
   }
   function img(url, w, h) {
     if (!url) return '';
-    return url.replace(/\/s\d+(-c)?\//, '/w' + w + '-h' + h + '-p-k-no-nu/').replace(/=s\d+(-c)?$/, '=w' + w + '-h' + h + '-p-k-no-nu');
+    return url.replace(/\/(s\d+(-c)?|w\d+-h\d+(-[a-z-]+)?)\//, '/w' + w + '-h' + h + '-p-k-no-nu/').replace(/=(s|w)\d+(-[a-z0-9-]+)?$/, '=w' + w + '-h' + h + '-p-k-no-nu');
   }
   function plain(html) {
     var t = String(html || '').replace(/<[^>]*>/g, ' ');
@@ -58,11 +65,13 @@
   function isVideo(p) {
     return (p.labels || []).some(function (l) { return CFG.videoLabels.indexOf(String(l).trim().toLowerCase()) > -1; });
   }
+  var seq = 0;
 
   /* ================= data ================= */
   function parse(e) {
     var link = (e.link || []).filter(function (l) { return l.rel === 'alternate'; })[0] || {};
     return {
+      pid: 'p' + (++seq),
       id: String(e.id.$t).split('post-').pop(),
       title: plain(e.title.$t),
       url: link.href,
@@ -74,42 +83,91 @@
   }
   function getFeed(path, start, max) {
     var url = ORIGIN + '/feeds/posts/summary/-/' + path + '?alt=json&start-index=' + start + '&max-results=' + max;
-    return fetch(url).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }).then(function (d) {
+    var timer = new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout')); }, 9000); });
+    return Promise.race([fetch(url), timer]).then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }).then(function (d) {
       var f = d.feed || {};
       var items = (f.entry || []).map(parse).filter(function (p) { return p.url && p.title; });
       return { items: items, raw: (f.entry || []).length, total: +((f.openSearch$totalResults || {}).$t || 0) };
     }).catch(function () { return { items: [], raw: 0, total: 0, failed: true }; });
   }
+  /* posts already rendered by Blogger inside the shell (used if the JSON feed is blocked or empty) */
+  function fromDom(root) {
+    return $$('.card', root).map(function (c) {
+      var a = c.querySelector('h2 a'), im = c.querySelector('.thumb img'), t = c.querySelector('time'), sm = c.querySelector('p');
+      if (!a || !a.href) return null;
+      return {
+        pid: 'p' + (++seq), id: '', title: a.textContent.replace(/\s+/g, ' ').trim(), url: a.href,
+        date: t ? (t.getAttribute('datetime') || '') : '',
+        image: im ? (im.getAttribute('src') || '') : '',
+        summary: sm ? sm.textContent.replace(/\s+/g, ' ').trim() : '',
+        labels: $$('.kicker-row a', c).map(function (x) { return x.textContent.trim(); })
+      };
+    }).filter(Boolean);
+  }
+
+  /* ---- images: find the first image / YouTube thumbnail inside the post when the feed gives none ---- */
+  function pickImage(html) {
+    html = String(html || '');
+    var m = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+    if (m) return m[1].replace(/&amp;/g, '&');
+    var y = /(?:youtube(?:-nocookie)?\.com\/embed\/|youtu\.be\/)([\w-]{11})/i.exec(html);
+    return y ? 'https://i.ytimg.com/vi/' + y[1] + '/hqdefault.jpg' : '';
+  }
+  function fetchImage(p) {
+    var key = 'sr7t:' + p.url;
+    try { var c = sessionStorage.getItem(key); if (c !== null) return Promise.resolve(c); } catch (e) {}
+    var url = /^\d+$/.test(p.id) ? ORIGIN + '/feeds/posts/default/' + p.id + '?alt=json'
+                                 : ORIGIN + '/feeds/posts/default?alt=json&max-results=1&path=' + encodeURIComponent(new URL(p.url).pathname);
+    return fetch(url).then(function (r) { if (!r.ok) throw 0; return r.json(); }).then(function (d) {
+      var e = d.entry || ((d.feed || {}).entry || [])[0] || {};
+      var src = pickImage(e.content && e.content.$t);
+      try { sessionStorage.setItem(key, src); } catch (x) {}
+      return src;
+    }).catch(function () { return ''; });
+  }
+  function imgTag(src, alt, w, h, eager) {
+    return '<img ' + (eager ? 'fetchpriority="high" decoding="async"' : 'loading="lazy" decoding="async"') + ' referrerpolicy="no-referrer" alt="' + esc(alt) + '" width="' + w + '" height="' + h + '" src="' + esc(img(src, w, h)) + '"' +
+      (eager ? ' srcset="' + esc(img(src, 640, 360)) + ' 640w, ' + esc(img(src, 1280, 720)) + ' 1280w" sizes="(max-width:900px) 100vw, 60vw"' : '') + '>';
+  }
+  function patch(p) {
+    $$('[data-pid="' + p.pid + '"]').forEach(function (el) {
+      var ph = el.querySelector('.t-ph'); if (ph) ph.remove();
+      var old = el.querySelector('img'); if (old) old.remove();
+      el.insertAdjacentHTML('afterbegin', imgTag(p.image, p.title, +el.getAttribute('data-w') || 640, +el.getAttribute('data-h') || 360, false));
+    });
+  }
+  function resolveImages(list) {
+    var q = list.filter(function (p) { return !p.image && !p.tried; });
+    function next() {
+      var p = q.shift(); if (!p) return;
+      p.tried = true;
+      return fetchImage(p).then(function (src) { if (src) { p.image = src; patch(p); } }).then(next);
+    }
+    for (var i = 0; i < 4; i++) next();
+  }
 
   /* ================= templates ================= */
-  function timeTag(p) { return '<div class="t-meta"><time datetime="' + esc(p.date) + '">' + esc(ago(p.date)) + '</time></div>'; }
-
+  function timeTag(p) { return p.date ? '<div class="t-meta"><time datetime="' + esc(p.date) + '">' + esc(ago(p.date)) + '</time></div>' : ''; }
+  function box(p, cls, w, h, eager) {
+    return '<a class="' + cls + '" data-pid="' + p.pid + '" data-w="' + w + '" data-h="' + h + '" href="' + esc(p.url) + '" tabindex="-1" aria-hidden="true">' +
+      (p.image ? imgTag(p.image, p.title, w, h, eager) : '<span class="t-ph">' + esc(SITE) + '</span>') + '</a>';
+  }
   function heroHTML(p) {
-    var u = esc(p.url), t = esc(p.title), im = '';
-    if (p.image) {
-      im = '<a class="t-hero-img" href="' + u + '" tabindex="-1" aria-hidden="true"><img alt="' + t + '" width="1280" height="720" fetchpriority="high" decoding="async" ' +
-        'src="' + esc(img(p.image, 1280, 720)) + '" ' +
-        'srcset="' + esc(img(p.image, 640, 360)) + ' 640w, ' + esc(img(p.image, 1280, 720)) + ' 1280w" sizes="(max-width:900px) 100vw, 60vw"></a>';
-    }
-    return '<article class="t-hero' + (p.image ? '' : ' noimg') + '">' + im +
-      '<div class="t-hero-body"><h2 class="t-hero-t"><a href="' + u + '">' + t + '</a></h2>' +
+    return '<article class="t-hero">' + box(p, 't-hero-img', 1280, 720, true) +
+      '<div class="t-hero-body"><h2 class="t-hero-t"><a href="' + esc(p.url) + '">' + esc(p.title) + '</a></h2>' +
       (p.summary ? '<p class="t-hero-s">' + esc(clip(p.summary, CFG.heroChars)) + '</p>' : '') + timeTag(p) + '</div></article>';
   }
   function rowHTML(p) {
-    var u = esc(p.url), t = esc(p.title);
-    return '<article class="t-row' + (p.image ? '' : ' noimg') + '">' +
-      (p.image ? '<a class="t-row-img" href="' + u + '" tabindex="-1" aria-hidden="true"><img loading="lazy" decoding="async" alt="' + t + '" width="480" height="270" src="' + esc(img(p.image, 480, 270)) + '"></a>' : '') +
-      '<h3 class="t-row-t"><a href="' + u + '">' + t + '</a></h3></article>';
+    return '<article class="t-row">' + box(p, 't-row-img', 480, 270) + '<h3 class="t-row-t"><a href="' + esc(p.url) + '">' + esc(p.title) + '</a></h3></article>';
   }
   function cardHTML(p) {
-    var u = esc(p.url), t = esc(p.title);
-    return '<article class="t-card' + (p.image ? '' : ' noimg') + '">' +
-      (p.image ? '<a class="t-card-img" href="' + u + '" tabindex="-1" aria-hidden="true"><img loading="lazy" decoding="async" alt="' + t + '" width="640" height="360" src="' + esc(img(p.image, 640, 360)) + '"></a>' : '') +
-      '<h3 class="t-card-t"><a href="' + u + '">' + t + '</a></h3>' +
+    return '<article class="t-card">' + box(p, 't-card-img', 640, 360) +
+      '<h3 class="t-card-t"><a href="' + esc(p.url) + '">' + esc(p.title) + '</a></h3>' +
       (p.summary ? '<p class="t-card-s">' + esc(clip(p.summary, CFG.cardChars)) + '</p>' : '') + timeTag(p) + '</article>';
   }
   function tileHTML(p) {
-    return '<a class="sr7-vtile" href="' + esc(p.url) + '"><span class="thumb"><img loading="lazy" alt="' + esc(p.title) + '" width="640" height="360" src="' + esc(img(p.image, 640, 360)) + '">' +
+    return '<a class="sr7-vtile" href="' + esc(p.url) + '"><span class="thumb" data-pid="' + p.pid + '" data-w="640" data-h="360">' +
+      (p.image ? imgTag(p.image, p.title, 640, 360, false) : '<span class="t-ph">' + esc(SITE) + '</span>') +
       '<span class="sr7-play" aria-hidden="true">' + PLAY + '</span></span><h3>' + esc(p.title) + '</h3></a>';
   }
   function railHTML(vids) {
@@ -126,6 +184,8 @@
     '.sr7-tech a:hover{color:var(--red,#001f51)}',
     '.sr7-tech .t-sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}',
     '.sr7-tech .t-meta{margin-top:12px;font:400 14px/1.4 var(--font,system-ui,sans-serif);color:var(--muted,#6b7077)}',
+    '.sr7-tech .t-ph{display:grid;place-items:center;width:100%;height:100%;padding:8px;text-align:center;background:linear-gradient(135deg,var(--red-soft,#e6edf8),var(--surface-2,#f1f2f4));color:var(--muted,#6b7077);font:800 clamp(13px,3.6vw,20px)/1.15 var(--font-head,Georgia,serif)}',
+    '.sr7-tech .sr7-vtile .t-ph{background:#0b1220;color:#8fa3c7}',
     /* hero (phone first: edge-to-edge image, centred text) */
     '.t-hero{display:block;margin:0}',
     '.t-hero-img{display:block;overflow:hidden;background:var(--surface-2,#f1f2f4);aspect-ratio:2/1;width:100vw;max-width:100vw;margin-left:calc(50% - 50vw)}',
@@ -133,18 +193,16 @@
     '.t-hero-body{padding:18px 0 22px;text-align:center;border-bottom:1px solid var(--line,#e6e8eb)}',
     '.t-hero-t{margin:0 0 12px;font:400 clamp(28px,8vw,34px)/1.14 var(--font-head,Georgia,serif);letter-spacing:-.01em}',
     '.t-hero-s{margin:0;font:400 clamp(17px,4.6vw,20px)/1.45 var(--font-head,Georgia,serif);color:var(--ink-2,#3c3f44)}',
-    '.t-hero.noimg .t-hero-body{padding-top:8px}',
-    /* rows: thumbnail left, headline right */
+    /* rows: thumbnail LEFT, headline right */
     '.t-rows{display:block}',
     '.t-row{display:grid;grid-template-columns:33% minmax(0,1fr);gap:20px;align-items:start;padding:20px 0;border-bottom:1px solid var(--line,#e6e8eb)}',
-    '.t-row.noimg{grid-template-columns:minmax(0,1fr)}',
     '.t-row-img{display:block;overflow:hidden;aspect-ratio:16/9;background:var(--surface-2,#f1f2f4)}',
     '.t-row-img img{display:block;width:100%;height:100%;object-fit:cover;margin:0;border-radius:0}',
     '.t-row-t{margin:0;font:700 clamp(18px,5vw,22px)/1.25 var(--font-head,Georgia,serif)}',
     /* section heading */
     '.t-sec{margin-top:14px}',
     '.t-sec-h{margin:0;padding:14px 0 4px;border-top:4px solid var(--ink,#1a1a1a);font:800 20px/1.2 var(--font,system-ui,sans-serif);letter-spacing:.02em;text-transform:uppercase}',
-    /* cards: headline + summary left, image floated right */
+    /* cards: headline + summary left, image floated RIGHT */
     '.t-more-list{display:block}',
     '.t-card{display:flow-root;padding:22px 0 18px;border-bottom:1px solid var(--line,#e6e8eb)}',
     '.t-card-img{float:right;width:46%;margin:2px 0 10px 18px;overflow:hidden;aspect-ratio:16/9;background:var(--surface-2,#f1f2f4)}',
@@ -158,7 +216,6 @@
     /* desktop */
     '@media (min-width:901px){',
     '  .t-hero{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:36px;align-items:center;padding:6px 0 30px;border-bottom:1px solid var(--line,#e6e8eb)}',
-    '  .t-hero.noimg{grid-template-columns:minmax(0,1fr)}',
     '  .t-hero-img{width:auto;max-width:none;margin-left:0;aspect-ratio:16/9;border-radius:var(--radius-sm,8px)}',
     '  .t-hero-body{padding:0;text-align:left;border:0}',
     '  .t-hero-t{font-size:clamp(34px,3.3vw,48px)}',
@@ -174,10 +231,10 @@
   ].join('\n');
 
   /* ================= structured data ================= */
-  function addLD(label, items) {
+  function addLD(label, items, canon) {
     try {
       var ld = [
-        { '@context': 'https://schema.org', '@type': 'CollectionPage', name: label, url: ORIGIN + location.pathname, isPartOf: { '@type': 'WebSite', url: ORIGIN + '/' } },
+        { '@context': 'https://schema.org', '@type': 'CollectionPage', name: label, url: canon, isPartOf: { '@type': 'WebSite', url: ORIGIN + '/' } },
         { '@context': 'https://schema.org', '@type': 'ItemList', itemListElement: items.slice(0, 12).map(function (p, i) { return { '@type': 'ListItem', position: i + 1, url: p.url, name: p.title }; }) },
         { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [
           { '@type': 'ListItem', position: 1, name: 'Home', item: ORIGIN + '/' }, { '@type': 'ListItem', position: 2, name: label } ] }
@@ -186,28 +243,44 @@
     } catch (e) {}
   }
 
+  /* /search/label/Technology  ->  shows /Technology in the address bar.
+     Only when /Technology really redirects (Blogger > Settings > Custom redirects), so reload/share never 404s.
+     Search engines still use the canonical label URL. */
+  function prettyUrl() {
+    var slug = CFG.prettyUrl;
+    if (!slug || !window.history || !history.replaceState) return;
+    if (!/\/search\/label\//i.test(location.pathname)) return;
+    fetch(ORIGIN + '/' + slug, { redirect: 'manual', cache: 'no-store' }).then(function (r) {
+      if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) history.replaceState(history.state, '', '/' + slug);
+    }).catch(function () {});
+  }
+
   /* ================= build ================= */
   function init() {
     var root = $('#sr7-tech');
     if (!root || root.getAttribute('data-sr7-init')) return;
     root.setAttribute('data-sr7-init', '1');
     var label = root.getAttribute('data-label') || 'Technology';
+    var domItems = fromDom(root), orig = root.innerHTML;
+    var canon = (($('link[rel="canonical"]') || {}).href) || (ORIGIN + location.pathname);
 
     var st = document.createElement('style'); st.id = 'sr7-tech-css'; st.textContent = CSS; document.head.appendChild(st);
 
     var safe = encodeURIComponent(label);
     var main = getFeed(safe, 1, CFG.firstBatch);
-    var techVids = getFeed(encodeURIComponent(CFG.videoLabel) + '/' + safe, 1, CFG.railMax);
+    var techVids = getFeed(encodeURIComponent(CFG.videoLabel) + '/' + safe, 1, CFG.railMax);   // BOTH labels only
 
     main.then(function (res) {
-      var posts = res.items.filter(function (p) { return !isVideo(p); });
+     try {
+      var fromFeed = res.items.length > 0;
+      var posts = (fromFeed ? res.items : domItems).filter(function (p) { return !isVideo(p); });
       if (!posts.length) return;                           // keep the theme's own grid
 
       var hi = 0; for (var i = 0; i < posts.length; i++) { if (posts[i].image) { hi = i; break; } }
       var hero = posts.splice(hi, 1)[0];
       var top = posts.splice(0, CFG.topCount);
       var more = posts;
-      var start = res.raw + 1, total = res.total;
+      var start = fromFeed ? res.raw + 1 : domItems.length + 1, total = fromFeed ? res.total : 0;   // total 0 = unknown
 
       root.innerHTML =
         '<h1 class="t-sr">' + esc(label) + '</h1>' +
@@ -218,19 +291,19 @@
           '<h2 class="t-sec-h">' + esc(CFG.moreTitle) + '</h2>' +
           '<div class="t-more-list" id="sr7-tech-list">' + more.map(cardHTML).join('') + '</div>' +
         '</section>' +
-        '<div class="t-more-wrap" id="sr7-tech-btnwrap"' + (start <= total ? '' : ' hidden') + '><button class="btn btn-red" id="sr7-tech-btn" type="button">Load more stories</button></div>';
+        '<div class="t-more-wrap" id="sr7-tech-btnwrap"' + (!total || start <= total ? '' : ' hidden') + '><button class="btn btn-red" id="sr7-tech-btn" type="button">Load more stories</button></div>';
       root.classList.add('is-on');
       var pager = root.parentNode && root.parentNode.querySelector('.pager'); if (pager) pager.hidden = true;
-      addLD(label, [hero].concat(top, more));
+      addLD(label, [hero].concat(top, more), canon);
+      resolveImages([hero].concat(top, more));
+      prettyUrl();
 
-      /* Videos rail (tech videos first, otherwise latest videos) */
+      /* Videos rail: only posts labelled Videos AND this label; hidden when there are none */
       techVids.then(function (tv) {
-        var v = tv.items;
-        if (v.length >= CFG.railMin) return v;
-        return getFeed(encodeURIComponent(CFG.videoLabel), 1, CFG.railMax).then(function (all) { return all.items; });
-      }).then(function (v) {
-        v = (v || []).filter(function (p) { return p.image; }).slice(0, CFG.railMax);
-        if (v.length) $('#sr7-tech-rail').innerHTML = railHTML(v);
+        var v = tv.items.slice(0, CFG.railMax);
+        if (!v.length) return;
+        $('#sr7-tech-rail').innerHTML = railHTML(v);
+        resolveImages(v);
       });
 
       /* Load more */
@@ -243,11 +316,13 @@
           if (add.length) {
             $('#sr7-tech-more').hidden = false;
             $('#sr7-tech-list').insertAdjacentHTML('beforeend', add.map(cardHTML).join(''));
+            resolveImages(add);
           }
-          if (r.failed || r.raw < CFG.moreBatch || start > (r.total || total)) wrap.hidden = true;
+          if (r.failed || r.raw < CFG.moreBatch || (total && start > total)) wrap.hidden = true;
           btn.textContent = 'Load more stories'; busy = false;
         });
       });
+     } catch (err) { root.innerHTML = orig; root.classList.remove('is-on'); }
     });
   }
 
