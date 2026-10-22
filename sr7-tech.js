@@ -20,7 +20,7 @@
     heroChars: 200,
     cardChars: 150,
     placeholder: '',                    // text on the grey box when a post has no image ('' = site name)
-    prettyUrl: 'Technology'             // show /Technology in the address bar (only if /Technology redirects here); '' = off
+    prettyUrl: ''                       // '' = keep the normal /search/label/... address (set to 'Technology' to show /Technology)
   };
 
   var ORIGIN = location.origin;
