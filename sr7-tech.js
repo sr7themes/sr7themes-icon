@@ -1,4 +1,4 @@
-/*! SR7 Technology label layout v1.1  |  The Orpte / SR7Themes
+/*! SR7 Technology label layout v1.2  |  The Orpte / SR7Themes
  *  BBC-style label page: full-width hero, rows with left thumbnails, Tech-videos rail, "More Tech" cards with right images.
  *  - Self-contained: injects its own CSS, reads the Blogger JSON feed, adds JSON-LD.
  *  - Needs the shell  <div id="sr7-tech" data-label="Technology">  rendered by the theme.
@@ -168,7 +168,8 @@
   function tileHTML(p) {
     return '<a class="sr7-vtile" href="' + esc(p.url) + '"><span class="thumb" data-pid="' + p.pid + '" data-w="640" data-h="360">' +
       (p.image ? imgTag(p.image, p.title, 640, 360, false) : '<span class="t-ph">' + esc(SITE) + '</span>') +
-      '<span class="sr7-play" aria-hidden="true">' + PLAY + '</span></span><h3>' + esc(p.title) + '</h3></a>';
+      '<span class="sr7-play" aria-hidden="true">' + PLAY + '</span></span>' +
+      '<div class="v-txt"><h3>' + esc(p.title) + '</h3>' + (p.date ? '<time class="v-t" datetime="' + esc(p.date) + '">' + esc(ago(p.date)) + '</time>' : '') + '</div></a>';
   }
   function railHTML(vids) {
     return '<section aria-label="Videos" class="sr7-vhome" id="sr7-tech-videos"><div class="sr7-vhome-head"><h2>' +
@@ -213,6 +214,23 @@
     '.t-more-wrap{display:flex;justify-content:center;margin:26px 0 8px}',
     '.t-more-wrap[hidden]{display:none}',
     '.sr7-tech .sr7-vhome{margin-top:26px}',
+    /* ---- Videos band: BBC-style (this page only, scoped to #sr7-tech-videos) ---- */
+    '#sr7-tech-videos.sr7-vhome{--vp:16px;margin-top:34px;margin-bottom:0;padding:26px 0 34px;background:#141414;color:#fff;border-radius:0;width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw)}',
+    '#sr7-tech-videos a,#sr7-tech-videos a:hover{color:#fff}',
+    '#sr7-tech-videos .sr7-vhome-head{padding:0 var(--vp) 18px;align-items:center}',
+    '#sr7-tech-videos .sr7-vhome-head h2{gap:10px;font:800 clamp(22px,5vw,28px)/1.15 var(--font,system-ui,sans-serif);letter-spacing:-.01em}',
+    '#sr7-tech-videos .sr7-vhome-head h2 svg{box-sizing:content-box;width:16px;height:16px;padding:6px;border:2px solid #fff;border-radius:50%}',
+    '#sr7-tech-videos .sr7-vhome-head a{opacity:1;font:700 14px/1.2 var(--font,system-ui,sans-serif);padding-bottom:3px;border-bottom:2px solid rgba(255,255,255,.55)}',
+    '#sr7-tech-videos .sr7-vhome-head a:hover{border-bottom-color:#fff}',
+    '#sr7-tech-videos .sr7-vtrack{gap:14px;padding:0 var(--vp) 4px;scroll-padding:0 var(--vp)}',
+    '#sr7-tech-videos .sr7-vtile{display:block;flex:0 0 78%}',
+    '#sr7-tech-videos .sr7-vtile .thumb{border-radius:0}',
+    '#sr7-tech-videos .sr7-vtile .thumb::after{height:40%}',
+    '#sr7-tech-videos .sr7-vtile .sr7-play{left:12px;bottom:12px;width:44px;height:44px;background:rgba(20,20,20,.82);border:2px solid #fff;transition:transform .2s,background .2s}',
+    '#sr7-tech-videos .sr7-vtile:hover .sr7-play{transform:scale(1.08);background:#000}',
+    '#sr7-tech-videos .sr7-vtile h3{margin:12px 0 0;font:700 clamp(18px,4.8vw,21px)/1.28 var(--font-head,Georgia,serif);-webkit-line-clamp:3}',
+    '#sr7-tech-videos .sr7-vtile:hover h3{text-decoration:underline;text-underline-offset:3px}',
+    '#sr7-tech-videos .v-t{display:block;margin-top:8px;font:400 13px/1.3 var(--font,system-ui,sans-serif);color:rgba(255,255,255,.68)}',
     /* desktop */
     '@media (min-width:901px){',
     '  .t-hero{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:36px;align-items:center;padding:6px 0 30px;border-bottom:1px solid var(--line,#e6e8eb)}',
@@ -226,7 +244,21 @@
     '  .t-card{padding:20px 0 22px}',
     '  .t-card-img{float:none;width:100%;margin:0 0 12px;border-radius:var(--radius-sm,8px)}',
     '  .t-card-t{font-size:21px}',
+    '  #sr7-tech-videos.sr7-vhome{--vp:24px;padding:34px 0 44px}',
+    '  #sr7-tech-videos .sr7-vtrack{display:grid;grid-template-columns:minmax(0,1.9fr) minmax(0,1fr);column-gap:32px;align-items:start;overflow:visible;scroll-snap-type:none}',
+    '  #sr7-tech-videos .sr7-vtile:first-child{grid-column:1;grid-row:1/span 4}',
+    '  #sr7-tech-videos .sr7-vtile:first-child h3{margin-top:16px;font-size:clamp(26px,2.6vw,34px);line-height:1.2;-webkit-line-clamp:4}',
+    '  #sr7-tech-videos .sr7-vtile:first-child .sr7-play{left:18px;bottom:18px;width:60px;height:60px}',
+    '  #sr7-tech-videos .sr7-vtile:first-child .sr7-play svg{width:26px;height:26px}',
+    '  #sr7-tech-videos .sr7-vtile:first-child .v-t{font-size:14px}',
+    '  #sr7-tech-videos .sr7-vtile:not(:first-child){grid-column:2;display:grid;grid-template-columns:42% minmax(0,1fr);gap:16px;align-items:start;padding:16px 0;border-top:1px solid rgba(255,255,255,.18)}',
+    '  #sr7-tech-videos .sr7-vtile:nth-child(2){padding-top:0;border-top:0}',
+    '  #sr7-tech-videos .sr7-vtile:nth-child(n+6){display:none}',
+    '  #sr7-tech-videos .sr7-vtile:not(:first-child) h3{margin:0;font-size:17px;line-height:1.3}',
+    '  #sr7-tech-videos .sr7-vtile:not(:first-child) .sr7-play{left:8px;bottom:8px;width:34px;height:34px}',
+    '  #sr7-tech-videos .sr7-vtile:not(:first-child) .sr7-play svg{width:15px;height:15px}',
     '}',
+    '@media (min-width:1329px){#sr7-tech-videos.sr7-vhome{--vp:calc((100vw - 1280px)/2 + 24px)}}',
     '@media (min-width:1200px){.t-more-list{grid-template-columns:repeat(4,minmax(0,1fr))}}'
   ].join('\n');
 
